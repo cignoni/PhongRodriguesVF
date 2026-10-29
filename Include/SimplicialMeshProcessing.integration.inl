@@ -140,17 +140,21 @@ void SystemAssembler::SetMatrixEntries( EigenMatrixEntries< NumElementsPerSimple
 {
 	eme.clear();
 
+	// Evaluate elements in parallel, then assemble in simplex order, as Vector()
+	// does. Atomic additions to shared entries otherwise round in scheduling order,
+	// making repeated solves differ even with identical element matrices.
+	std::vector< SquareMatrix< double , NumElementsPerSimplex > > matrices( numS );
 	ThreadPool::ParallelFor
 	(
 		0 , numS ,
-		[&]( size_t sIdx )
-		{
-			size_t idx = sIdx * NumElementsPerSimplex * NumElementsPerSimplex;
-			SquareMatrix< double , NumElementsPerSimplex > M = MF[ sIdx ];
-			for( unsigned int e1=0 ; e1<NumElementsPerSimplex ; e1++ ) for( unsigned int e2=0 ; e2<NumElementsPerSimplex ; e2++ , idx++ )
-				MishaK::AddAtomic( eme.matrixEntry( idx ) , M(e1,e2) );
-		}
+		[&]( size_t sIdx ){ matrices[sIdx] = MF[sIdx]; }
 	);
+	for( size_t sIdx=0 ; sIdx<numS ; sIdx++ )
+	{
+		size_t idx = sIdx * NumElementsPerSimplex * NumElementsPerSimplex;
+		for( unsigned int e1=0 ; e1<NumElementsPerSimplex ; e1++ ) for( unsigned int e2=0 ; e2<NumElementsPerSimplex ; e2++ , idx++ )
+			eme.matrixEntry( idx ) += matrices[sIdx](e1,e2);
+	}
 }
 
 ////////////////////////
